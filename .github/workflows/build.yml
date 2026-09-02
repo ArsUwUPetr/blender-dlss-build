@@ -23,29 +23,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 1. Надежная установка CUDA через Chocolatey
+      # 1. Установка CUDA через Chocolatey
       - name: Install CUDA Toolkit via Chocolatey
         shell: pwsh
         run: |
           choco install cuda --no-progress -y
-          # Находим путь установки и экспортируем в окружение GitHub Actions
           $cudaDir = (Get-Item "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*").FullName | Select-Object -Last 1
           Write-Host "CUDA Installed at: $cudaDir"
           echo "CUDA_PATH=$cudaDir" >> $env:GITHUB_ENV
           echo "CUDA_TOOLKIT_ROOT_DIR=$cudaDir" >> $env:GITHUB_ENV
           echo "$cudaDir\bin" >> $env:GITHUB_PATH
 
-      # 2. Скачивание OptiX 8.0 SDK Headers и DLSS SDK Headers
+      # 2. Загрузка OptiX 8/9 и DLSS SDK заголовков
       - name: Setup OptiX & DLSS Headers
         shell: bash
         run: |
-          mkdir -p optix/include
-          
-          # Заголовки OptiX 8.0
-          git clone --depth 1 https://github.com/NVIDIA/OptiX_Apps.git optix_apps
-          cp -r optix_apps/3rdparty/OptiX/include/* optix/include/
-
-          # Заголовки NVIDIA DLSS SDK (nvsdk_ngx.h и др.)
+          git clone --depth 1 https://github.com/NVIDIA/optix-dev.git optix
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
           cp -r nvidia_dlss/include/* optix/include/
 
@@ -57,8 +50,6 @@ jobs:
           cd src
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
-          
-          # Копируем заголовки DLSS в папки Cycles
           cp -r ../optix/include/* intern/cycles/integrator/ || true
 
       # 4. Загрузка стандартных зависимостей Blender
@@ -68,7 +59,7 @@ jobs:
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      # 5. Сборка Blender с включенными CUDA, OptiX и DLSS
+      # 5. Сборка Blender с поддержкой CUDA, OptiX и DLSS
       - name: Build Blender with CUDA, OptiX & DLSS
         shell: cmd
         env:
@@ -77,7 +68,7 @@ jobs:
           cd src
           make.bat release -- -DWITH_CYCLES_CUDA_BINARIES=ON -DWITH_CYCLES_DEVICE_OPTIX=ON -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%"
 
-      # 6. Копирование библиотек нейросети DLSS Ray Reconstruction в папку с программой
+      # 6. Копирование DLL DLSS Ray Reconstruction в папку с Blender
       - name: Copy DLSS Runtime DLLs to Build Directory
         shell: bash
         run: |
