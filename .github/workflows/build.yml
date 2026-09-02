@@ -59,14 +59,14 @@ jobs:
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      # 5. Сборка Blender с поддержкой CUDA, OptiX и DLSS
+      # 5. Сборка Blender
       - name: Build Blender with CUDA, OptiX & DLSS
         shell: cmd
         env:
           OPTIX_ROOT_DIR: ${{ github.workspace }}\optix
         run: |
           cd src
-          make.bat release -- -DWITH_CYCLES_CUDA_BINARIES=ON -DWITH_CYCLES_DEVICE_OPTIX=ON -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%"
+          make.bat release
 
       # 6. Копирование DLL DLSS Ray Reconstruction в папку с Blender
       - name: Copy DLSS Runtime DLLs to Build Directory
