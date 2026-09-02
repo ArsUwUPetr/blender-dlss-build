@@ -1,4 +1,4 @@
-name: Build Blender with DLSS PR (Fast Build)
+name: Build Blender with DLSS PR
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ jobs:
   build-windows:
     runs-on: windows-2022
     steps:
-      - name: Free Disk Space
+      - name: Free Disk Space on Runner
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force "C:\Program Files\Android" -ErrorAction SilentlyContinue
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       # 1. Установка CUDA через Chocolatey
-      - name: Install CUDA Toolkit
+      - name: Install CUDA Toolkit via Chocolatey
         shell: pwsh
         run: |
           choco install cuda --no-progress -y
@@ -34,7 +34,7 @@ jobs:
           echo "CUDA_TOOLKIT_ROOT_DIR=$cudaDir" >> $env:GITHUB_ENV
           echo "$cudaDir\bin" >> $env:GITHUB_PATH
 
-      # 2. OptiX & DLSS Headers
+      # 2. Загрузка OptiX 8/9 и DLSS SDK заголовков
       - name: Setup OptiX & DLSS Headers
         shell: bash
         run: |
@@ -42,7 +42,7 @@ jobs:
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
           cp -r nvidia_dlss/include/* optix/include/
 
-      # 3. Клонирование PR
+      # 3. Клонирование PR #153077 и настройка ускорения под RTX
       - name: Clone Blender Source and PR
         shell: bash
         run: |
@@ -51,44 +51,50 @@ jobs:
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
           cp -r ../optix/include/* intern/cycles/integrator/ || true
+          
+          # Ограничиваем компиляцию CUDA только картами RTX (20xx: sm_75, 30xx: sm_86, 40xx: sm_89) для скорости
+          echo 'set(CYCLES_CUDA_BINARIES_ARCH "sm_75;sm_86;sm_89" CACHE STRING "" FORCE)' >> build_files/cmake/config/blender_release.cmake
 
-      # 4. Загрузка библиотек
+      # 4. Загрузка библиотек Blender
       - name: Download Precompiled Libraries
         shell: cmd
         run: |
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      # 5. СВЕРХБЫСТРАЯ СБОРКА: Только RTX архитектуры (20xx/30xx/40xx) + Ninja
-      - name: Fast Build Blender (RTX Only)
+      # 5. Сборка Blender через Ninja (без лишних флагов и без "--")
+      - name: Build Blender with CUDA, OptiX & DLSS
         shell: cmd
         env:
           OPTIX_ROOT_DIR: ${{ github.workspace }}\optix
         run: |
           cd src
-          make.bat ninja release -- -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%" -DCYCLES_CUDA_BINARIES_ARCH="75;86;89"
+          make.bat release ninja
 
-      # 6. Упаковка всего Blender + DLSS DLLs в архив
+      # 6. Автоматический поиск blender.exe, подкладывание DLL и архивация
       - name: Package Blender and DLSS DLLs
         if: success()
         shell: pwsh
         run: |
-          $blenderExe = Get-ChildItem -Path . -Filter "blender.exe" -Recurse | Select-Object -First 1
+          $blenderExe = Get-ChildItem -Path .. -Filter "blender.exe" -Recurse | Select-Object -First 1
           if (-not $blenderExe) {
-              $blenderExe = Get-ChildItem -Path .. -Filter "blender.exe" -Recurse | Select-Object -First 1
+              $blenderExe = Get-ChildItem -Path . -Filter "blender.exe" -Recurse | Select-Object -First 1
           }
           if (-not $blenderExe) {
-              Write-Error "blender.exe was not found after compilation!"
+              Write-Error "blender.exe not found!"
               exit 1
           }
 
           $binDir = $blenderExe.DirectoryName
-          Write-Host "Blender found in: $binDir"
+          Write-Host "Blender directory found: $binDir"
 
+          # Копируем DLL Ray Reconstruction прямо к blender.exe
           Copy-Item "nvidia_dlss\lib\Windows_x86_64\rel\*.dll" -Destination $binDir -Force
+
+          # Сжимаем всю папку с Blender
           7z a -mx=5 blender-dlss-win64.zip "$binDir\*"
 
-      # 7. Выгрузка архива
+      # 7. Выгрузка готового архива
       - name: Archive Build Artifact
         if: success()
         uses: actions/upload-artifact@v4
