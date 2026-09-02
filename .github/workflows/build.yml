@@ -7,12 +7,11 @@ jobs:
   build-windows:
     runs-on: windows-2022
     steps:
-      - name: Free Disk Space on Runner
+      - name: Free Disk Space
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force "C:\Program Files\Android" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Java" -ErrorAction SilentlyContinue
-          Get-PSDrive C
 
       - name: Enable long paths in Git
         shell: pwsh
@@ -24,6 +23,29 @@ jobs:
         with:
           python-version: '3.11'
 
+      # 1. Установка CUDA Toolkit
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "thrust", "cub"]'
+
+      # 2. Скачивание OptiX 8.0 SDK Headers и DLSS SDK Headers
+      - name: Setup OptiX & DLSS Headers
+        shell: bash
+        run: |
+          mkdir -p optix/include
+          
+          # Заголовки OptiX 8.0
+          git clone --depth 1 https://github.com/NVIDIA/OptiX_Apps.git optix_apps
+          cp -r optix_apps/3rdparty/OptiX/include/* optix/include/
+
+          # Заголовки NVIDIA DLSS SDK (nvsdk_ngx.h и др.)
+          git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
+          cp -r nvidia_dlss/include/* optix/include/
+
+      # 3. Клонирование PR 153077
       - name: Clone Blender Source and PR
         shell: bash
         run: |
@@ -31,23 +53,46 @@ jobs:
           cd src
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
+          
+          # Подкладываем DLSS заголовки также в папку Cycles на случай прямого поиска
+          cp -r ../optix/include/* intern/cycles/integrator/ || true
 
-      - name: Download Precompiled Libraries (Direct Python)
+      # 4. Загрузка стандартных зависимостей Blender
+      - name: Download Precompiled Libraries
         shell: cmd
         run: |
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      - name: Build Blender (Release)
+      # 5. Сборка Blender с включенными CUDA, OptiX и DLSS
+      - name: Build Blender with CUDA, OptiX & DLSS
         shell: cmd
+        env:
+          OPTIX_ROOT_DIR: ${{ github.workspace }}\optix
         run: |
           cd src
-          make.bat release
+          make.bat release -- -DWITH_CYCLES_CUDA_BINARIES=ON -DWITH_CYCLES_DEVICE_OPTIX=ON -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%"
 
+      # 6. Вкладываем необходимые DLL DLSS Ray Reconstruction в папку с Blender
+      - name: Copy DLSS Runtime DLLs to Build Directory
+        shell: bash
+        run: |
+          mkdir -p build_windows_Full_x64_vc17_Release/bin
+          # Копируем nvngx_dlss.dll и nvngx_dlssd.dll (Ray Reconstruction)
+          cp nvidia_dlss/lib/Windows_x86_64/rel/*.dll build_windows_Full_x64_vc17_Release/bin/ || true
+
+      # 7. Сжатие в ZIP
+      - name: Compress Blender with 7-Zip
+        if: success()
+        shell: pwsh
+        run: |
+          7z a -mx=7 blender-dlss-win64.zip .\build_windows_Full_x64_vc17_Release\bin\*
+
+      # 8. Выгрузка готового архива
       - name: Archive Build Artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Blender-DLSS-Windows-x64
-          path: build_windows_Full_x64_vc17_Release/bin/*
-          retention-days: 7
+          path: blender-dlss-win64.zip
+          retention-days: 2
