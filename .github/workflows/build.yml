@@ -23,13 +23,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 1. Установка CUDA Toolkit
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.19
-        with:
-          cuda: '12.4.1'
-          method: 'network'
-          sub-packages: '["nvcc", "cudart", "thrust", "cub"]'
+      # 1. Надежная установка CUDA через Chocolatey
+      - name: Install CUDA Toolkit via Chocolatey
+        shell: pwsh
+        run: |
+          choco install cuda --no-progress -y
+          # Находим путь установки и экспортируем в окружение GitHub Actions
+          $cudaDir = (Get-Item "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*").FullName | Select-Object -Last 1
+          Write-Host "CUDA Installed at: $cudaDir"
+          echo "CUDA_PATH=$cudaDir" >> $env:GITHUB_ENV
+          echo "CUDA_TOOLKIT_ROOT_DIR=$cudaDir" >> $env:GITHUB_ENV
+          echo "$cudaDir\bin" >> $env:GITHUB_PATH
 
       # 2. Скачивание OptiX 8.0 SDK Headers и DLSS SDK Headers
       - name: Setup OptiX & DLSS Headers
@@ -45,7 +49,7 @@ jobs:
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
           cp -r nvidia_dlss/include/* optix/include/
 
-      # 3. Клонирование PR 153077
+      # 3. Клонирование исходников Blender и PR #153077
       - name: Clone Blender Source and PR
         shell: bash
         run: |
@@ -54,7 +58,7 @@ jobs:
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
           
-          # Подкладываем DLSS заголовки также в папку Cycles на случай прямого поиска
+          # Копируем заголовки DLSS в папки Cycles
           cp -r ../optix/include/* intern/cycles/integrator/ || true
 
       # 4. Загрузка стандартных зависимостей Blender
@@ -73,12 +77,11 @@ jobs:
           cd src
           make.bat release -- -DWITH_CYCLES_CUDA_BINARIES=ON -DWITH_CYCLES_DEVICE_OPTIX=ON -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%"
 
-      # 6. Вкладываем необходимые DLL DLSS Ray Reconstruction в папку с Blender
+      # 6. Копирование библиотек нейросети DLSS Ray Reconstruction в папку с программой
       - name: Copy DLSS Runtime DLLs to Build Directory
         shell: bash
         run: |
           mkdir -p build_windows_Full_x64_vc17_Release/bin
-          # Копируем nvngx_dlss.dll и nvngx_dlssd.dll (Ray Reconstruction)
           cp nvidia_dlss/lib/Windows_x86_64/rel/*.dll build_windows_Full_x64_vc17_Release/bin/ || true
 
       # 7. Сжатие в ZIP
