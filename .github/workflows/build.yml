@@ -1,4 +1,4 @@
-name: Build Blender with DLSS PR
+name: Build Blender with DLSS PR (Fast Build)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       # 1. Установка CUDA через Chocolatey
-      - name: Install CUDA Toolkit via Chocolatey
+      - name: Install CUDA Toolkit
         shell: pwsh
         run: |
           choco install cuda --no-progress -y
@@ -34,7 +34,7 @@ jobs:
           echo "CUDA_TOOLKIT_ROOT_DIR=$cudaDir" >> $env:GITHUB_ENV
           echo "$cudaDir\bin" >> $env:GITHUB_PATH
 
-      # 2. Загрузка OptiX 8/9 и DLSS SDK заголовков
+      # 2. OptiX & DLSS Headers
       - name: Setup OptiX & DLSS Headers
         shell: bash
         run: |
@@ -42,7 +42,7 @@ jobs:
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
           cp -r nvidia_dlss/include/* optix/include/
 
-      # 3. Клонирование исходников Blender и PR #153077
+      # 3. Клонирование PR
       - name: Clone Blender Source and PR
         shell: bash
         run: |
@@ -52,37 +52,43 @@ jobs:
           git checkout dlss-pr
           cp -r ../optix/include/* intern/cycles/integrator/ || true
 
-      # 4. Загрузка стандартных зависимостей Blender
+      # 4. Загрузка библиотек
       - name: Download Precompiled Libraries
         shell: cmd
         run: |
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      # 5. Сборка Blender
-      - name: Build Blender with CUDA, OptiX & DLSS
+      # 5. СВЕРХБЫСТРАЯ СБОРКА: Только RTX архитектуры (20xx/30xx/40xx) + Ninja
+      - name: Fast Build Blender (RTX Only)
         shell: cmd
         env:
           OPTIX_ROOT_DIR: ${{ github.workspace }}\optix
         run: |
           cd src
-          make.bat release
+          make.bat ninja release -- -DOPTIX_ROOT_DIR="%OPTIX_ROOT_DIR%" -DCYCLES_CUDA_BINARIES_ARCH="75;86;89"
 
-      # 6. Копирование DLL DLSS Ray Reconstruction в папку с Blender
-      - name: Copy DLSS Runtime DLLs to Build Directory
-        shell: bash
-        run: |
-          mkdir -p build_windows_Full_x64_vc17_Release/bin
-          cp nvidia_dlss/lib/Windows_x86_64/rel/*.dll build_windows_Full_x64_vc17_Release/bin/ || true
-
-      # 7. Сжатие в ZIP
-      - name: Compress Blender with 7-Zip
+      # 6. Упаковка всего Blender + DLSS DLLs в архив
+      - name: Package Blender and DLSS DLLs
         if: success()
         shell: pwsh
         run: |
-          7z a -mx=7 blender-dlss-win64.zip .\build_windows_Full_x64_vc17_Release\bin\*
+          $blenderExe = Get-ChildItem -Path . -Filter "blender.exe" -Recurse | Select-Object -First 1
+          if (-not $blenderExe) {
+              $blenderExe = Get-ChildItem -Path .. -Filter "blender.exe" -Recurse | Select-Object -First 1
+          }
+          if (-not $blenderExe) {
+              Write-Error "blender.exe was not found after compilation!"
+              exit 1
+          }
 
-      # 8. Выгрузка готового архива
+          $binDir = $blenderExe.DirectoryName
+          Write-Host "Blender found in: $binDir"
+
+          Copy-Item "nvidia_dlss\lib\Windows_x86_64\rel\*.dll" -Destination $binDir -Force
+          7z a -mx=5 blender-dlss-win64.zip "$binDir\*"
+
+      # 7. Выгрузка архива
       - name: Archive Build Artifact
         if: success()
         uses: actions/upload-artifact@v4
