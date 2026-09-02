@@ -42,8 +42,8 @@ jobs:
           git clone --depth 1 https://github.com/NVIDIA/DLSS.git nvidia_dlss
           cp -r nvidia_dlss/include/* optix/include/
 
-      # 3. Клонирование PR #153077 и настройка ускорения под RTX
-      - name: Clone Blender Source and PR
+      # 3. Клонирование PR #153077 и ВКЛЮЧЕНИЕ WITH_DLSS
+      - name: Clone Blender Source and Enable DLSS
         shell: bash
         run: |
           git clone --depth 1 https://projects.blender.org/blender/blender.git src
@@ -52,7 +52,9 @@ jobs:
           git checkout dlss-pr
           cp -r ../optix/include/* intern/cycles/integrator/ || true
           
-          # Ограничиваем компиляцию CUDA только картами RTX (20xx: sm_75, 30xx: sm_86, 40xx: sm_89) для скорости
+          # ВКЛЮЧАЕМ DLSS В КОНФИГУРАЦИИ СБОРКИ:
+          echo 'set(WITH_DLSS ON CACHE BOOL "" FORCE)' >> build_files/cmake/config/blender_release.cmake
+          # Ограничиваем CUDA только картами RTX для быстрой сборки (15-20 мин):
           echo 'set(CYCLES_CUDA_BINARIES_ARCH "sm_75;sm_86;sm_89" CACHE STRING "" FORCE)' >> build_files/cmake/config/blender_release.cmake
 
       # 4. Загрузка библиотек Blender
@@ -62,11 +64,12 @@ jobs:
           cd src
           python build_files\utils\make_update.py --no-blender
 
-      # 5. Сборка Blender через Ninja (без лишних флагов и без "--")
+      # 5. Сборка Blender через Ninja
       - name: Build Blender with CUDA, OptiX & DLSS
         shell: cmd
         env:
           OPTIX_ROOT_DIR: ${{ github.workspace }}\optix
+          DLSS_SDK_ROOT: ${{ github.workspace }}\nvidia_dlss
         run: |
           cd src
           make.bat release ninja
