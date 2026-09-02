@@ -7,10 +7,22 @@ jobs:
   build-windows:
     runs-on: windows-2022
     steps:
-      - name: Enable long paths in Git and Windows
+      - name: Free Disk Space on Runner
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "C:\Program Files\Android" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Java" -ErrorAction SilentlyContinue
+          Get-PSDrive C
+
+      - name: Enable long paths in Git
         shell: pwsh
         run: |
           git config --system core.longpaths true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Clone Blender Source and PR
         shell: bash
@@ -20,20 +32,20 @@ jobs:
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
 
-      - name: Download SVN Precompiled Libs
+      - name: Download Precompiled Libraries (Direct Python)
         shell: cmd
         run: |
           cd src
-          echo y | make.bat update
+          python build_files\utils\make_update.py --no-blender
 
-      - name: Build Blender
+      - name: Build Blender (Release)
         shell: cmd
         run: |
           cd src
-          echo y | make.bat release
+          make.bat release
 
       - name: Archive Build Artifact
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Blender-DLSS-Windows-x64
