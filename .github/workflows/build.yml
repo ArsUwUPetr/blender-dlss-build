@@ -1,39 +1,39 @@
 name: Build Blender with DLSS PR
 
 on:
-  workflow_dispatch: # Позволяет запускать сборку вручную по кнопке
+  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-2022
     steps:
-      - name: Maximize build disk space
+      - name: Enable long paths in Git and Windows
         shell: pwsh
         run: |
-          # Убеждаемся, что хватает места
-          Get-PSDrive
+          git config --system core.longpaths true
 
       - name: Clone Blender Source and PR
         shell: bash
         run: |
-          git clone --depth 50 https://projects.blender.org/blender/blender.git blender-src
-          cd blender-src
+          git clone --depth 1 https://projects.blender.org/blender/blender.git src
+          cd src
           git fetch origin refs/pull/153077/head:dlss-pr
           git checkout dlss-pr
 
-      - name: Download Precompiled Libraries (make update)
+      - name: Download SVN Precompiled Libs
         shell: cmd
         run: |
-          cd blender-src
-          make.bat update
+          cd src
+          echo y | make.bat update
 
-      - name: Build Blender (Release)
+      - name: Build Blender
         shell: cmd
         run: |
-          cd blender-src
-          make.bat release
+          cd src
+          echo y | make.bat release
 
       - name: Archive Build Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Blender-DLSS-Windows-x64
