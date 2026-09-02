@@ -1,0 +1,41 @@
+name: Build Blender with DLSS PR
+
+on:
+  workflow_dispatch: # Позволяет запускать сборку вручную по кнопке
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - name: Maximize build disk space
+        shell: pwsh
+        run: |
+          # Убеждаемся, что хватает места
+          Get-PSDrive
+
+      - name: Clone Blender Source and PR
+        shell: bash
+        run: |
+          git clone --depth 50 https://projects.blender.org/blender/blender.git blender-src
+          cd blender-src
+          git fetch origin refs/pull/153077/head:dlss-pr
+          git checkout dlss-pr
+
+      - name: Download Precompiled Libraries (make update)
+        shell: cmd
+        run: |
+          cd blender-src
+          make.bat update
+
+      - name: Build Blender (Release)
+        shell: cmd
+        run: |
+          cd blender-src
+          make.bat release
+
+      - name: Archive Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blender-DLSS-Windows-x64
+          path: build_windows_Full_x64_vc17_Release/bin/*
+          retention-days: 7
